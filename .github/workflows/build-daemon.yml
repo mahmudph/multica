@@ -12,7 +12,6 @@ on:
   push:
     branches:
       - main
-      - feat/commandcode-runtime-adapter
 
 permissions:
   contents: read
