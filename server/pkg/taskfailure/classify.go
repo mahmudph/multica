@@ -190,6 +190,17 @@ func Classify(rawError string) Reason {
 	//    matching rule 13 by accident) and agent_error.unknown respectively;
 	//    neither is on the retry allowlist, so a transient cut ended the task
 	//    outright and max_attempts never applied (#6522).
+	//    "command-code stream ended" is the analogous witness
+	//    commandcodeBackend.processEvents raises (pkg/agent/commandcode.go)
+	//    when the NDJSON stream ends without the protocol's terminal `result`
+	//    frame — same shape as the OpenCode guard. It can appear bare (no exit
+	//    error appended) or with "; command-code exited with error: exit
+	//    status N; command-code stderr: ..." trailing it, e.g. a provider-side
+	//    "The API server encountered an error. Please try again later."
+	//    CommandCode has no bespoke wording for that provider failure, so
+	//    without this witness rule 13's "exit status" would claim it as
+	//    agent_error.process_failure — a real provider hiccup misreported as
+	//    our own runner crashing.
 	//    Pi's OpenAI-compatible SDK surfaces a dropped LiteLLM/OpenAI call as
 	//    the bare strings "Connection error." and "Request timed out." on
 	//    turn_end.errorMessage (then exits 1). Those used to fall through to
@@ -203,6 +214,7 @@ func Classify(rawError string) Reason {
 			"stream disconnected",
 			opencodeStreamEndedPrefix,
 			codeartsStreamEndedPrefix,
+			commandcodeStreamEndedPrefix,
 			"connection closed",
 			"mid-response",
 			"error sending request",
@@ -434,6 +446,13 @@ func isPiProviderNetworkError(lower string) bool {
 const (
 	opencodeStreamEndedPrefix = "opencode stream ended"
 	codeartsStreamEndedPrefix = "codearts stream ended"
+	// commandcodeStreamEndedPrefix opens every failure
+	// commandcodeBackend.processEvents raises (pkg/agent/commandcode.go) when
+	// the NDJSON event stream ends without ever parsing the protocol's
+	// terminal `result` frame — a PREFIX of the whole error, so its presence
+	// identifies the failure outright regardless of what (if anything) is
+	// appended after it.
+	commandcodeStreamEndedPrefix = "command-code stream ended without a terminal result frame"
 )
 
 // legacyOpencodeStreamEndedReasons are the buckets a daemon predating rule 7's

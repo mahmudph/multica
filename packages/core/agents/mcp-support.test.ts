@@ -16,6 +16,10 @@ describe("providerSupportsMcpConfig", () => {
     // ZeroClaw's ACP server never reads `params.mcpServers` — MCP lives in
     // ZeroClaw's own config-dir, so a value saved here could not be honoured.
     expect(providerSupportsMcpConfig("zeroclaw")).toBe(false);
+    // Command Code exposes only `cmd mcp` server-management subcommands, no
+    // per-invocation config flag comparable to Claude's --mcp-config; see
+    // commandcodeBackend's doc comment.
+    expect(providerSupportsMcpConfig("commandcode")).toBe(false);
     expect(providerSupportsMcpConfig(undefined)).toBe(false);
     expect(providerSupportsMcpConfig(null)).toBe(false);
   });

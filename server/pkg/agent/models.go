@@ -303,6 +303,10 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		// ModelSelectionSupported. Return an empty list rather than spawning
 		// an ACP subprocess that can only ever come back empty.
 		return Catalog{Models: []Model{}}, nil
+	case "commandcode":
+		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
+			return discovered(discoverCommandcodeModels(ctx, runtimeCmd))
+		})
 	default:
 		return Catalog{}, fmt.Errorf("unknown agent type: %q", providerType)
 	}
@@ -2589,6 +2593,100 @@ func parseCursorModels(output string) []Model {
 			Label:    label,
 			Provider: "cursor",
 			Default:  isDefault,
+		})
+	}
+	return models
+}
+
+// discoverCommandcodeModels runs `command-code --list-models` and parses its
+// plain-text catalog (captured live against Command Code v1.26.0):
+//
+//	Available models  ·  55 models
+//
+//	Open Source
+//
+//	deepseek/deepseek-v4-pro             hybrid-attention long-context reasoning
+//	deepseek/deepseek-v4-flash           fast hybrid-attention reasoning (default)
+//	…
+//
+//	Anthropic
+//
+//	claude-sonnet-5                      best combo of speed & intelligence (recommended)
+//	…
+//
+//	Pass the full id, or just the short name after the last "/":
+//	  cmd --model moonshotai/kimi-k2.5
+//
+//	Docs:  https://commandcode.ai/docs/reference/cli/models
+//
+// No JSON output mode is documented for this command, so this parses the
+// text table like discoverCursorModels does for cursor-agent. There is no
+// per-provider error return: an unreachable/unauthenticated CLI degrades to
+// an empty catalog (manual model entry) rather than a fallback list, mirroring
+// discoverAntigravityModels — Command Code's catalog changes too often for a
+// baked-in stand-in to stay meaningfully accurate.
+func discoverCommandcodeModels(ctx context.Context, runtimeCmd Command) ([]Model, error) {
+	if runtimeCmd.Path == "" {
+		runtimeCmd.Path = "command-code"
+	}
+	if _, err := exec.LookPath(runtimeCmd.Path); err != nil {
+		return nil, nil
+	}
+	// 15s to match the other network-backed discovery paths (cursor/pi/ACP):
+	// per the CLI's own docs this is "the live" catalog, not a purely local
+	// enumeration.
+	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	cmd := runtimeCmd.exec(runCtx, "--list-models")
+	hideAgentWindow(cmd)
+	out, err := outputOwned(cmd, runtimeCmd.logger)
+	if err != nil && len(out) == 0 {
+		return nil, nil
+	}
+	return parseCommandcodeModels(string(out)), nil
+}
+
+// commandcodeModelRowRe matches a column-aligned "<id>  <description>" row:
+// a single non-space token, then a 2+-space gutter, then the rest of the
+// line. Section headers (e.g. "Anthropic", "Open Source") have no such
+// gutter and never match; isOpenclawIdentifier rejects anything else that
+// slips through, including the trailing "Docs:  <url>" line (its id-position
+// token ends in ":").
+var commandcodeModelRowRe = regexp.MustCompile(`^(\S+)\s{2,}(\S.*)$`)
+
+// parseCommandcodeModels extracts model rows from `command-code
+// --list-models` output. Label uses the short name — the part of the id
+// after the last "/", or the id itself when it has none — rather than the
+// long-form description column: the CLI's own trailing usage note
+// ("Pass the full id, or just the short name after the last '/'") already
+// treats that short form as the canonical human-facing name, and the
+// description column runs to a full sentence per model, too long for a
+// picker row. The "(default)" marker in the description still sets
+// Model.Default; it just no longer needs stripping since it was never part
+// of the label to begin with.
+func parseCommandcodeModels(output string) []Model {
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	var models []Model
+	seen := map[string]bool{}
+	for scanner.Scan() {
+		m := commandcodeModelRowRe.FindStringSubmatch(scanner.Text())
+		if m == nil {
+			continue
+		}
+		id, description := m[1], strings.TrimSpace(m[2])
+		if !isOpenclawIdentifier(id) || seen[id] {
+			continue
+		}
+		seen[id] = true
+		label := id
+		if idx := strings.LastIndex(id, "/"); idx >= 0 && idx+1 < len(id) {
+			label = id[idx+1:]
+		}
+		models = append(models, Model{
+			ID:      id,
+			Label:   label,
+			Default: strings.HasSuffix(description, "(default)"),
 		})
 	}
 	return models

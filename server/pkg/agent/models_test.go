@@ -1289,6 +1289,132 @@ func TestParseOpenclawAgentsJSONRejectsGarbage(t *testing.T) {
 	}
 }
 
+// TestParseCommandcodeModels feeds the real, verbatim output of
+// `command-code --list-models` (Command Code v1.26.0) through the parser —
+// captured live, not hand-written — and checks the shapes that matter: the
+// full count, that section headers and the trailing "Docs:" line don't leak
+// in as models, that the "(default)" marker sets Default, and that the label
+// is the short name after the last "/" (or the bare id when it has none).
+func TestParseCommandcodeModels(t *testing.T) {
+	input := `Available models  ·  55 models
+
+Open Source
+
+deepseek/deepseek-v4-pro             hybrid-attention long-context reasoning
+deepseek/deepseek-v4-flash           fast hybrid-attention reasoning (default)
+moonshotai/kimi-k3                   long-horizon coding & knowledge work with 1M context
+moonshotai/kimi-k2.7-code            improved long-horizon coding with vision
+moonshotai/kimi-k2.7-code-highspeed  high-speed long-horizon coding with vision
+moonshotai/kimi-k2.6                 long-horizon coding with vision
+moonshotai/kimi-k2.5                 multimodal frontend coding
+zai-org/glm-5.3                      frontier coding with emergent cyber capabilities
+zai-org/glm-5.2                      powerful coding with 1M context and long-horizon tasks
+zai-org/glm-5.2-fast                 high-throughput GLM-5.2 with 1M context
+zai-org/glm-5.1                      long-horizon autonomous coding agent
+zai-org/glm-5                        multi-mode thinking & long-range planning
+minimaxai/minimax-m3                 frontier coding, agents & native multimodality
+minimaxai/minimax-m2.7               end-to-end software engineering agent
+minimaxai/minimax-m2.5               cross-platform full-stack agentic dev
+xiaomi/mimo-v2.5-pro                 high-capability long-context agentic coding
+xiaomi/mimo-v2.5                     efficient long-context agentic coding
+qwen/qwen3.8-max                     autonomous long-horizon coding & professional work
+qwen/qwen3.7-max                     frontier coding & long-horizon agent execution
+qwen/qwen3.7-plus                    agentic coding & reasoning at lower cost
+qwen/qwen3.7-flash                   fast low-cost agentic coding & reasoning
+qwen/qwen3.6-max-preview             vibe coding & efficient agent execution
+qwen/qwen3.6-plus                    agentic coding & reasoning
+stepfun/step-3.7-flash               multimodal sparse-MoE reasoning
+stepfun/step-3.5-flash               fast sparse-MoE agentic reasoning
+tencent/hy3-paid                     sparse-MoE reasoning & agentic tool use
+nvidia/nemotron-3-ultra-550b-a55b    open reasoning model for long-horizon autonomous agents
+thinkingmachines/inkling             multimodal MoE reasoning
+thinkingmachines/inkling-small       lightweight MoE reasoning at lower cost and latency
+poolside/laguna-s-2.1-free           FREE open-weight agentic coding and long-horizon work
+
+Anthropic
+
+claude-sonnet-5                      best combo of speed & intelligence (recommended)
+claude-sonnet-4-6                    prev Sonnet, still fast & capable
+claude-fable-5                       most capable for demanding reasoning & long-horizon agents
+claude-opus-5                        most intelligent Opus for agents and coding
+claude-opus-4-8                      prev flagship, still strong for agents and coding
+claude-opus-4-7                      older Opus, still strong for agents and coding
+claude-haiku-4-5                     fastest & most compact, great for quick tasks
+
+OpenAI
+
+gpt-5.6-sol                          frontier model for complex professional work
+gpt-5.6-terra                        balances intelligence and cost
+gpt-5.6-luna                         optimized for cost-sensitive workloads
+gpt-5.5                              latest frontier model for general complex work
+gpt-5.4                              frontier model for general complex work
+gpt-5.3-codex                        frontier coding model
+gpt-5.4-mini                         fast, cost-effective model for everyday tasks
+
+Google
+
+google/gemini-3.7-flash              higher-quality coding & agentic workflows, fewer tokens
+google/gemini-3.6-flash              previous Gemini Flash, still fast & capable
+google/gemini-3.5-flash              Pro-level coding proficiency, parallel agentic execution
+google/gemini-3.5-flash-lite         upgraded agentic capabilities, ideal for subagents
+google/gemini-3.1-flash-lite         high-volume workhorse model with implicit caching
+
+Sakana
+
+sakana/fugu-ultra                    multi-agent orchestration across frontier models
+
+Meta
+
+meta/muse-spark-1.1                  agentic performance, tool use, and computer use
+meta/muse-spark-1.2                  coding-optimized for agentic workflows and large codebases
+meta/muse-spark-1.2-contributor      Muse Spark 1.2 at ~95% off
+
+xAI
+
+xai/grok-4.5                         smartest model for coding, agentic tasks, knowledge work
+xai/grok-4.6                         frontier performance on coding, knowledge work, and STEM
+
+Pass the full id, or just the short name after the last "/":
+cmd --model moonshotai/kimi-k2.5
+cmd --model kimi-k2.5
+
+Docs:  https://commandcode.ai/docs/reference/cli/models
+`
+	models := parseCommandcodeModels(input)
+	if len(models) != 55 {
+		t.Fatalf("expected 55 models, got %d: %+v", len(models), models)
+	}
+	ids := map[string]Model{}
+	for _, m := range models {
+		ids[m.ID] = m
+	}
+	for _, unwanted := range []string{"Available", "Open", "Anthropic", "OpenAI", "Google", "Sakana", "Meta", "xAI", "Docs:", "cmd", "Pass"} {
+		if _, ok := ids[unwanted]; ok {
+			t.Errorf("section header or trailing help text leaked in as a model: %q", unwanted)
+		}
+	}
+	def, ok := ids["deepseek/deepseek-v4-flash"]
+	if !ok {
+		t.Fatalf("missing deepseek/deepseek-v4-flash in: %+v", models)
+	}
+	if !def.Default {
+		t.Errorf("deepseek/deepseek-v4-flash should be marked default, got %+v", def)
+	}
+	if def.Label != "deepseek-v4-flash" {
+		t.Errorf("label should be the short name after the last '/', got %q", def.Label)
+	}
+	recommended, ok := ids["claude-sonnet-5"]
+	if !ok {
+		t.Fatalf("missing claude-sonnet-5 in: %+v", models)
+	}
+	if recommended.Default {
+		t.Errorf("claude-sonnet-5 is only \"(recommended)\", not the catalog default: %+v", recommended)
+	}
+	if recommended.Label != "claude-sonnet-5" {
+		t.Errorf("id without '/' should use the full id as label, got %q", recommended.Label)
+	}
+}
+
 func TestParseCursorModels(t *testing.T) {
 	input := `Available models
 

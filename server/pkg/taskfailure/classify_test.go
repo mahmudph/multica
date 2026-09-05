@@ -121,6 +121,13 @@ func TestClassifyRules(t *testing.T) {
 		{"opencode continuation never started", "opencode stream ended without a terminal signal (last step required a continuation that never started)", ReasonAgentProviderNetwork},
 		{"opencode empty final step", "opencode stream ended on an empty step (no text, no tool call, no reported usage) — the provider produced nothing", ReasonAgentProviderNetwork},
 		{"opencode empty step with process exit appended", "opencode stream ended on an empty step (no text, no tool call, no reported usage) — the provider produced nothing; opencode exited with error: exit status 1", ReasonAgentProviderNetwork},
+		// Command Code's analogous terminal-signal witness: the NDJSON stream
+		// ended without the protocol's `result` frame. "exit status" alone
+		// would otherwise claim a provider-exit-appended variant for rule 13
+		// (process_failure), misreporting the provider's own transient error
+		// as our runner crashing.
+		{"commandcode stream ended bare", "command-code stream ended without a terminal result frame", ReasonAgentProviderNetwork},
+		{"commandcode stream ended with provider exit wins over process failure", "command-code stream ended without a terminal result frame; command-code exited with error: exit status 7; command-code stderr: Error: The API server encountered an error. Please try again later.", ReasonAgentProviderNetwork},
 		// BHD-135: Pi's OpenAI-compatible SDK wording for a dropped LiteLLM
 		// call. Bare strings, then the same strings glued to "exit status 1"
 		// after pi-print-clean-exit forces a non-zero wrap-up.

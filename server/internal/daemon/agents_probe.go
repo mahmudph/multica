@@ -303,6 +303,15 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_ZEROCLAW_PATH", "zeroclaw", ""); ok {
 		agents["zeroclaw"] = e
 	}
+	// Command Code (commandcode.ai) ships two npm bin aliases, `cmd` and
+	// `command-code`. We probe the long form only: `cmd` collides with
+	// Windows' own cmd.exe (the system shell), so exec.LookPath("cmd") on a
+	// Windows daemon would false-positive-detect the shell as the agent CLI.
+	// A user who installed only the `cmd` alias can still point at it via
+	// MULTICA_COMMANDCODE_PATH.
+	if e, ok := probe("MULTICA_COMMANDCODE_PATH", "command-code", "MULTICA_COMMANDCODE_MODEL"); ok {
+		agents["commandcode"] = e
+	}
 	return agents
 }
 

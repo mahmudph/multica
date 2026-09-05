@@ -3,6 +3,7 @@ claude
 codebuddy
 codearts
 codex
+command-code
 copilot
 cursor-agent
 deveco

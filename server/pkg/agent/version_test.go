@@ -213,6 +213,11 @@ func TestCheckMinVersion(t *testing.T) {
 		{"zeroclaw", "invalid", true},
 		{"dim", "0.2.99", true},
 		{"dim", "invalid", true},
+		{"commandcode", "command-code 1.26.0", false},
+		{"commandcode", "1.26.0", false},
+		{"commandcode", "1.27.0", false},
+		{"commandcode", "1.25.9", true},
+		{"commandcode", "invalid", true},
 		{"unknown", "1.0.0", false},
 	}
 	for _, tt := range tests {

@@ -508,6 +508,33 @@ func TestZeroclawLaunchPrefixFiltersBlockedFlags(t *testing.T) {
 	}
 }
 
+// TestCommandcodeLaunchPrefixFiltersBlockedFlags proves the Command Code
+// launch-prefix safety policy: allowed positional prefix tokens reach the
+// command ahead of the invocation's own flags, while flags that duplicate
+// what commandcodeBackend.Execute hardcodes (-p, --yolo, --resume, and the
+// rest of commandcodeBlockedArgs) are stripped from the prefix so a custom
+// runtime profile's fixed_args cannot escape task isolation.
+func TestCommandcodeLaunchPrefixFiltersBlockedFlags(t *testing.T) {
+	t.Parallel()
+
+	// Allowed positional prefix tokens survive and precede the invocation's
+	// own flags.
+	cfg := Config{LaunchPrefix: []string{"start", "q36"}, Logger: slog.Default()}
+	argv := cfg.commandAt("wrapper").Argv("-p", "--output-format", "json")
+	if idx := prefixIndex(argv, []string{"start", "q36", "-p", "--output-format", "json"}); idx != 0 {
+		t.Fatalf("commandcode: allowed prefix must precede the invocation flags, got %v", argv)
+	}
+
+	// Protocol-breaking flags are removed from the prefix.
+	got := filterLaunchPrefix(
+		[]string{"start", "-p", "--yolo", "--resume", "old-session", "q36"},
+		"commandcode", slog.Default())
+	want := []string{"start", "q36"}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("commandcode: blocked flags must be stripped, got %v, want %v", got, want)
+	}
+}
+
 // TestHermesLaunchArgvMatchesBackendAssembly is the root of the second-round
 // Hermes finding: the daemon must resolve the profile from the argv the backend
 // actually builds, not from a concatenation that leaves out `acp`.
