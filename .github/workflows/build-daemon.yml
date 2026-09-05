@@ -1,0 +1,66 @@
+name: Build Daemon (personal fork)
+
+# Personal-fork CLI/daemon build. Kept separate from release.yml on purpose:
+# release.yml's `release` job (GoReleaser + Homebrew tap publish) and
+# `desktop` job are gated to `github.repository_owner == 'multica-ai'` and
+# need HOMEBREW_TAP_GITHUB_TOKEN, neither of which this fork has. This
+# workflow just cross-compiles the `multica` binary (which embeds the local
+# agent daemon, see `cmd/multica`) and hands back plain binaries as run
+# artifacts — no publishing, no external tap.
+on:
+  workflow_dispatch: {}
+  push:
+    branches:
+      - feat/commandcode-runtime-adapter
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: darwin
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          check-latest: true
+          cache-dependency-path: server/go.sum
+
+      - name: Build multica CLI/daemon
+        working-directory: server
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          version="$(git describe --tags --match 'v[0-9]*' --always --dirty)"
+          commit="$(git rev-parse --short HEAD)"
+          date="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          out="bin/multica-${GOOS}-${GOARCH}"
+          [ "$GOOS" = "windows" ] && out="${out}.exe"
+          go build -ldflags "-s -w -X main.version=${version} -X main.commit=${commit} -X main.date=${date}" \
+            -o "$out" ./cmd/multica
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: multica-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: server/bin/multica-${{ matrix.goos }}-${{ matrix.goarch }}*
+          if-no-files-found: error
+          retention-days: 14
